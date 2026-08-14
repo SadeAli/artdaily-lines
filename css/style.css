@@ -1,0 +1,370 @@
+/* ============================================================
+   SadeAli subdomain starter — shared design tokens.
+   Friendly-terminal theme, same palette as sadeali.com so the
+   network feels like one place. Dark-first; the toggle switches
+   to the "paper terminal" light mode. Extend freely below the
+   tokens; keep zero dependencies.
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+  --bg: #131020;
+  --card: #1D1932;
+  --ink: #EDE9FF;
+  --muted: #A79FC2;
+  --line: #352C55;
+  --shadow: rgba(0, 0, 0, 0.45);
+  --focus: #9D7BF4;
+  --link: #3FB3F6;
+
+  --coral: #FF6B6B;
+  --sunny: #FFB627;
+  --mint: #2EC4A6;
+  --sky: #3FB3F6;
+  --lilac: #9D7BF4;
+  --bubblegum: #F46BB8;
+  --prompt: var(--mint);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #FDF6EC;
+  --card: #FFFFFF;
+  --ink: #2B2440;
+  --muted: #6E6587;
+  --line: #E8DCC8;
+  --shadow: rgba(43, 36, 64, 0.10);
+  --focus: #1A73AD;
+  --link: #1A73AD;
+  --prompt: #0F7A63; /* mint darkened to pass AA on cream (4.9:1) */
+}
+
+* { box-sizing: border-box; }
+
+/* Stage-0 surfaces rely on [hidden] beating component display rules. */
+[hidden] { display: none !important; }
+
+html { height: 100%; scrollbar-color: var(--muted) var(--bg); }
+
+/* Selecting text inverts it, like a real terminal. */
+::selection { background: var(--prompt); color: var(--bg); }
+
+body {
+  margin: 0;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "Fira Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  /* Terminal cells: no ligatures, digits all the same width. */
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums lining-nums;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+:is(a, button, input, [tabindex]):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* ===== Terminal window component ===== */
+
+.term {
+  position: relative;
+  background: var(--card);
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 5px 0 var(--shadow);
+  overflow: hidden;
+  text-align: left;
+}
+
+/* Faint CRT scanlines over terminal windows (dark mode only). */
+.term::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0, 0, 0, 0.09) 2px 3px);
+}
+:root[data-theme="light"] .term::after { display: none; }
+
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-bottom: 2px solid var(--line);
+  background: color-mix(in srgb, var(--line) 35%, var(--card));
+}
+
+.dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot.d1 { background: var(--coral); }
+.dot.d2 { background: var(--sunny); }
+.dot.d3 { background: var(--mint); }
+
+.term-title {
+  margin-left: 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.term-body { padding: 24px 26px 28px; }
+
+.promptline {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.prompt { color: var(--prompt); font-weight: 900; user-select: none; /* copying a command never grabs the $ */ }
+
+/* ===== Topbar ===== */
+
+.topbar { display: flex; align-items: center; gap: 8px; padding: 14px; }
+.topbar-spacer { flex: 1; }
+
+.backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  font-size: 0.9rem;
+  text-decoration: none;
+  padding: 8px 14px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 3px 0 var(--shadow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.backlink:hover { transform: translateY(-2px); box-shadow: 0 5px 0 var(--shadow); }
+
+.iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 2px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+  box-shadow: 0 3px 0 var(--shadow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.iconbtn:hover { transform: translateY(-2px); box-shadow: 0 5px 0 var(--shadow); }
+
+/* Dark (default) shows the sun (click → light); light shows the moon. */
+.ic-moon { display: none; }
+:root[data-theme="light"] .ic-moon { display: inline; }
+:root[data-theme="light"] .ic-sun { display: none; }
+
+/* ===== Main stage (replace with your experiment) ===== */
+
+.stage {
+  flex: 1;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 16px 20px 48px;
+}
+
+.stage .term-body { text-align: center; }
+.stage .promptline { text-align: left; }
+
+.stage h1 { font-size: clamp(1.7rem, 6vw, 2.6rem); font-weight: 900; margin: 0.2em 0 0.2em; }
+.stage .lede { color: var(--muted); font-weight: 600; margin: 0 0 26px; }
+
+.placeholder {
+  padding: 56px 20px;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--line) 18%, var(--card));
+}
+
+/* ===== Footer ===== */
+
+.footer { text-align: center; padding: 40px 20px 28px; color: var(--muted); }
+
+.footnav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.footnav a { text-decoration: none; }
+.footnav a:hover { text-decoration: underline; text-decoration-thickness: 2px; }
+#supportLinks { display: contents; }
+
+.heart-ink { color: var(--coral); }
+.fineprint { margin: 12px 0 0; font-size: 0.78rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   Art Daily game chrome — shared by every drill so the whole
+   arcade feels like one studio. A game's own look comes from
+   --game-accent (override below) + what it draws on the canvas.
+   ============================================================ */
+
+:root { --game-accent: var(--mint); } /* steady lines: mint */
+
+.stage.game-wide { max-width: 780px; }
+
+.game-body { text-align: left; }
+
+/* ===== HUD ===== */
+
+.game-hud {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.game-name { margin: 0; font-size: 1.35rem; font-weight: 900; }
+.game-emoji { margin-right: 2px; }
+.game-tagline { margin: 2px 0 0; color: var(--muted); font-size: 0.85rem; font-weight: 600; }
+
+.hud-stats { display: flex; gap: 8px; margin: 0; }
+
+.hud-stat {
+  min-width: 64px;
+  padding: 6px 10px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--line) 18%, var(--card));
+  text-align: center;
+}
+.hud-stat dt {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hud-stat dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: var(--game-accent);
+}
+
+.hint { min-height: 1.6em; margin: 6px 0 10px; color: var(--muted); font-size: 0.85rem; font-weight: 600; }
+
+/* ===== Drill stage ===== */
+
+.game-stage { position: relative; }
+
+/* The canvas stays transparent; this sketchbook dot-grid shows through.
+   Games repaint on ArtDaily.onTheme() so inks follow the theme. */
+.game-canvas {
+  display: block;
+  width: 100%;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background:
+    radial-gradient(color-mix(in srgb, var(--ink) 8%, transparent) 1px, transparent 1.5px) 0 0 / 18px 18px,
+    var(--card);
+  touch-action: none;      /* draw, don't scroll, on touch screens */
+  cursor: crosshair;
+}
+
+/* Score pop. The global reduced-motion rule flattens the animation. */
+.toast {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 4px 0 var(--shadow);
+  font-weight: 900;
+  white-space: nowrap;
+  animation: toast-pop 0.25s ease;
+}
+.toast .toast-accent { color: var(--game-accent); }
+@keyframes toast-pop {
+  from { transform: translateX(-50%) translateY(-8px); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0);    opacity: 1; }
+}
+
+/* ===== Controls ===== */
+
+.game-controls { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+
+.btn {
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: var(--ink);
+  padding: 9px 16px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 3px 0 var(--shadow);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 5px 0 var(--shadow); }
+.btn:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--shadow); }
+
+/* Bright accent chip with near-black ink — AA in both themes. */
+.btn-primary { background: var(--game-accent); color: #131020; border-color: transparent; }
+
+.howto {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.howto p { margin: 4px 0; }
+.howto-cmd { font-weight: 800; }
+
+/* ===== Embedded inside the Art Daily player ===== */
+/* The player supplies the window chrome, so the game sheds its own. */
+
+:root.embed .topbar,
+:root.embed .footer,
+:root.embed .term-bar { display: none; }
+:root.embed .stage { padding: 10px 12px 16px; max-width: none; }
+:root.embed .term { border: 0; box-shadow: none; border-radius: 0; background: transparent; }
+:root.embed .term::after { display: none; }
+:root.embed .term-body { padding: 0; }
+
+/* Light "paper" mode: the bright accents fail AA as text on white cards,
+   so accent-colored chrome text gets ink-mixed dark enough to pass. */
+:root[data-theme="light"] .hud-stat dd,
+:root[data-theme="light"] .toast .toast-accent {
+  color: color-mix(in srgb, var(--game-accent) 45%, var(--ink));
+}
