@@ -4,16 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Steady Lines — Art Daily</title>
-<meta name="description" content="ghost straight strokes through the checkpoints — a daily art drill from artdaily.sadeali.com">
+<meta name="description" content="pull straight strokes from dot to dot — a daily art drill from artdaily.sadeali.com">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Steady Lines">
-<meta property="og:description" content="ghost straight strokes through the checkpoints — a daily art drill">
+<meta property="og:description" content="pull straight strokes from dot to dot — a daily art drill">
 <meta property="og:site_name" content="Art Daily · SadeAli">
 <meta property="og:url" content="https://sadeali.github.io/artdaily-lines/">
 <link rel="canonical" href="https://sadeali.github.io/artdaily-lines/">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Steady Lines">
-<meta name="twitter:description" content="ghost straight strokes through the checkpoints — a daily art drill">
+<meta name="twitter:description" content="pull straight strokes from dot to dot — a daily art drill">
 <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;✏️&lt;/text&gt;&lt;/svg&gt;">
 <link rel="stylesheet" href="css/style.css">
 <script>
@@ -37,12 +37,13 @@
       <div class="game-hud">
         <div class="game-id">
           <h1 class="game-name"><span class="game-emoji" aria-hidden="true">✏️</span> Steady Lines</h1>
-          <p class="game-tagline">ghost straight strokes through the checkpoints</p>
+          <p class="game-tagline">pull straight strokes from dot to dot</p>
         </div>
         <dl class="hud-stats">
           <div class="hud-stat"><dt>round</dt><dd id="hudRound">–</dd></div>
           <div class="hud-stat"><dt>score</dt><dd id="hudScore">–</dd></div>
           <div class="hud-stat"><dt>best</dt><dd id="hudBest">–</dd></div>
+                <div class="hud-stat hud-input"><dd id="inputMode" hidden></dd></div>
         </dl>
       </div>
 
@@ -60,8 +61,11 @@
       <div class="howto" id="howTo" hidden>
         <p class="howto-cmd" aria-hidden="true"><span class="prompt">$</span> man lines</p>
         <p>Press down on the A dot, pull one confident stroke to B, lift. Six strokes per round — they get longer as you go. The reveal holds a moment so you can study it; tap to jump to the next pair.</p>
-        <p>Scored on how little your line drifts from the ideal segment, minus a nick for missing the dots — a visibly clean stroke earns a 100. The reveal marks where you drifted widest and reads your pull as steady or hesitant; your last two attempts stay faintly ghosted with their ideal lines — that is the studio technique. At round end you get your tendency: if most strokes bow the same way, the drill says so.</p>
-        <p>Tip: draw from the shoulder, not the wrist, and keep your eyes on the B dot — never on the pen tip. One confident pull beats a careful trace.</p>
+        <p>You do not have to hit A exactly. Press anywhere inside the wide dashed circle and the drill measures your line from wherever you landed — a miss is never refused and never costs you.</p>
+        <p><strong>Ran out of desk or trackpad halfway?</strong> Lifting early does not score. The drill says how far you got and draws a small circle where you stopped: press inside it and the same stroke carries on. Only a stroke that reaches B is graded.</p>
+        <p>Scored on how little your line curves away from the straight path between the two dots, minus a nick for stopping short of B — a visibly clean stroke earns a 100 on any device. The reveal marks where you drifted widest and reads your pull as steady or hesitant; your last two attempts stay faintly behind the new one with their straight paths, which is the studio technique. At round end you get your tendency: if most lines curve the same way, the drill says so.</p>
+        <p>The drill grades against the hardware it detects (shown in the corner as “scoring for …”), because the same wobble means different things from a mouse, a finger and a pen. Your score is only ever compared with your own.</p>
+        <p>Tip, pen or stylus: draw from the shoulder, not the wrist, and keep your eyes on the B dot — never on the tip. Tip, mouse or trackpad: one quick confident flick beats a slow careful drag — speed hides the wobble.</p>
       </div>
 
       <noscript><p class="hint">This drill needs JavaScript — nothing else, no trackers, no accounts.</p></noscript>

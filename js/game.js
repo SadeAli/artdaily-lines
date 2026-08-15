@@ -1,28 +1,62 @@
 /* ============================================================
-   game.js — Steady Lines: ghost straight strokes through the
-   checkpoints. Six endpoint pairs per round; press on A, pull one
-   stroke to B, lift. Scoring is pure segment geometry (RMS drift
-   from the ideal line + endpoint misses) — the pure functions sit
-   at the top so they are unit-testable without a canvas. The two
-   previous attempts stay faintly ghosted (with their ideal lines):
-   ghosting lines is the actual studio warm-up this drill copies.
+   game.js — Steady Lines: pull straight strokes from dot to dot.
+   Six endpoint pairs per round; press on (or near) A, pull to B,
+   lift. Scoring is pure segment geometry (RMS drift from the ideal
+   line + endpoint misses) — the pure functions sit at the top so
+   they are unit-testable without a canvas. The two previous
+   attempts stay faintly behind the new one, with their ideal lines:
+   drawing over your own last try is the studio warm-up this copies.
+
+   Hardware fairness (protocol v1 input profile):
+     · the error at which the score dies is ArtDaily.ease()d, so a
+       mouse's wrist arc is not graded against a pen tablet's sweep;
+     · every relative tolerance has an absolute pixel floor, so a
+       332px phone canvas is not held to twice the desktop standard;
+     · the start ring is ArtDaily.startRadius()d and SNAPS — a press
+       near A is measured from where you landed, never refused;
+     · a lift that stops short does not score: press again where you
+       lifted and the same stroke carries on (a trackpad cannot pull
+       550px in one throw, and that is not a drawing mistake).
    ============================================================ */
 (function () {
   'use strict';
 
   var SLUG = 'lines';
   var STROKES_PER_ROUND = 6;
-  var START_RADIUS = 28;   /* px around A that counts as a start */
-  var MIN_SAMPLES = 8;     /* fewer sampled points = accidental tap */
-  var REVEAL_MS = 1500;    /* reveal holds this long; a tap skips ahead */
+  var START_BASE = 28;      /* px around A before the SDK's per-device scaling */
+  var SNAP_MULT = 3;        /* a press this many radii out is accepted, not refused */
+  var MIN_PATH_PX = 22;     /* drawn path shorter than this is a tap, not a stroke */
+  var RESUME_PX = 60;       /* press this close to where you lifted = same stroke */
+  var RESUME_MS = 3000;
+  var DONE_FRAC = 0.88;     /* stroke counts as finished once it gets this far to B */
+  var REVEAL_MS = 1500;     /* reveal holds this long; a tap skips ahead */
   var GHOSTS_KEPT = 2;
+  var PEN_LOCKOUT_MS = 700; /* a finger is inert this long after the pen last spoke */
+
+  /* Drift tolerance is relative to |AB| — a longer pull earns more room —
+     but never below an absolute pixel floor. Without the floor the phone's
+     short first stroke zeroed at 6.4px RMS while the desktop's equivalent
+     was allowed 13px: the same drill, half the tolerance, on the device
+     with the least precise input. The ZERO point is the eased one; the
+     free zone stays absolute because "as good as a hand gets" is a pixel
+     count, not a hardware setting. */
+  var REL_FREE = 0.004, FREE_FLOOR_PX = 3;
+  var REL_ZERO = 0.055, ZERO_FLOOR_PX = 16;
+  var ENDPOINT_FREE_PX = 24; /* combined endpoint miss that costs nothing */
 
   /* ============================================================
      Pure scoring — geometry in, 0–100 out. No canvas, no DOM.
      Points are {x,y} (input samples also carry t, a timestamp in
-     ms, which only steadiness() reads).
+     ms, which only steadiness() reads). `ease` is the multiplier
+     from ArtDaily.ease(1): 1 pen, 2 mouse/trackpad, 1.5 finger.
      ============================================================ */
   function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+  function pathLength(pts) {
+    var s = 0, i;
+    for (i = 1; i < pts.length; i++) s += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    return s;
+  }
 
   /* Perpendicular distance from point p to the line through a→b. */
   function perpDist(p, a, b) {
@@ -41,36 +75,66 @@
     return { x: a.x + t * abx, y: a.y + t * aby };
   }
 
-  /* RMS perpendicular drift of the samples, normalized by |AB|. */
-  function strokeError(points, a, b) {
-    var len = Math.hypot(b.x - a.x, b.y - a.y);
-    if (len === 0 || points.length === 0) return 1;
+  /* RMS perpendicular drift of the samples, in pixels. */
+  function driftPx(points, a, b) {
+    if (!points || points.length === 0) return Infinity;
     var sum = 0, d, i;
     for (i = 0; i < points.length; i++) {
       d = perpDist(points[i], a, b);
       sum += d * d;
     }
-    return Math.sqrt(sum / points.length) / len;
+    return Math.sqrt(sum / points.length);
   }
 
-  /* The first 0.4% of drift is free (no hand stroke is at exactly
-     zero, and a score of 100 must be reachable); zero at 5.5%. */
-  function straightness(err) {
-    return 100 * clamp01(1 - Math.max(0, err - 0.004) / 0.051);
+  /* The px band this attempt is graded in: free = still a clean 100,
+     zero = the score has run out. */
+  function tolerancePx(len, ease) {
+    var e = ease > 0 ? ease : 1;
+    var L = len > 0 ? len : 0;
+    return {
+      free: Math.max(REL_FREE * L, FREE_FLOOR_PX),
+      zero: e * Math.max(REL_ZERO * L, ZERO_FLOOR_PX),
+    };
   }
 
-  /* First 24px of combined endpoint miss are free, then up to −20. */
-  function endpointPenalty(missA, missB) {
-    return 20 * clamp01((missA + missB - 24) / 160);
+  function straightness(rms, len, ease) {
+    var t = tolerancePx(len, ease);
+    if (!isFinite(rms)) return 0;
+    if (t.zero <= t.free) return rms <= t.free ? 100 : 0;
+    return 100 * clamp01(1 - (rms - t.free) / (t.zero - t.free));
   }
 
-  function strokeScore(points, a, b) {
+  /* First 24px of combined endpoint miss are free — eased, because a
+     mouse stops where the mouse stops — then up to −20. */
+  function endpointPenalty(missA, missB, ease) {
+    var free = (ease > 0 ? ease : 1) * ENDPOINT_FREE_PX;
+    return 20 * clamp01((missA + missB - free) / 160);
+  }
+
+  /* How far along a→b the stroke actually got (1 = reached B). */
+  function strokeProgress(points, a, b) {
     if (!points || points.length === 0) return 0;
+    var abx = b.x - a.x, aby = b.y - a.y;
+    var len2 = abx * abx + aby * aby;
+    if (len2 === 0) return 1;
+    var last = points[points.length - 1];
+    return ((last.x - a.x) * abx + (last.y - a.y) * aby) / len2;
+  }
+
+  /* The scored segment starts where the player actually landed. A press
+     inside the snap ring is a hit, and the stroke it begins is judged
+     from that first sample to B — the whole attempt is translated onto
+     the target rather than the first sample alone, which would leave a
+     blind landing paying for an offset it also corrected. */
+  function strokeScore(points, a, b, ease) {
+    /* one sample is a press, not a line — it has no straightness to read */
+    if (!points || points.length < 2) return 0;
+    var len = Math.hypot(b.x - a.x, b.y - a.y);
     var first = points[0], last = points[points.length - 1];
     var missA = Math.hypot(first.x - a.x, first.y - a.y);
     var missB = Math.hypot(last.x - b.x, last.y - b.y);
-    var s = straightness(strokeError(points, a, b)) - endpointPenalty(missA, missB);
-    return Math.max(0, Math.min(100, s));
+    var s = straightness(driftPx(points, a, b), len, ease) - endpointPenalty(missA, missB, ease);
+    return isFinite(s) ? Math.max(0, Math.min(100, s)) : 0;
   }
 
   /* The sample where the stroke drifted furthest — for the reveal
@@ -110,7 +174,7 @@
   }
 
   /* Mean signed perpendicular offset as a fraction of |AB|.
-     Positive = the stroke bows right of the pull direction
+     Positive = the stroke bows right of the direction of travel
      (screen coords, y down). */
   function signedBias(points, a, b) {
     var abx = b.x - a.x, aby = b.y - a.y;
@@ -123,17 +187,17 @@
     return (sum / points.length) / len;
   }
 
-  /* Round-end coaching: if most strokes bow the same way, say so.
-     Takes the per-stroke signedBias values; returns '' when there is
-     no consistent tendency worth reporting. */
+  /* Round-end coaching: if most strokes bow the same way, say so in
+     plain words. Takes the per-stroke signedBias values; returns ''
+     when there is no consistent tendency worth reporting. */
   function biasCoaching(biasList) {
     var right = 0, left = 0, i;
     for (i = 0; i < biasList.length; i++) {
       if (biasList[i] > 0.006) right += 1;
       else if (biasList[i] < -0.006) left += 1;
     }
-    if (right >= 4 && right > left) return 'your strokes bow right of the pull — aim a hair left.';
-    if (left >= 4 && left > right) return 'your strokes bow left of the pull — aim a hair right.';
+    if (right >= 4 && right > left) return 'your lines curve to the right of the straight path — aim a hair left.';
+    if (left >= 4 && left > right) return 'your lines curve to the left of the straight path — aim a hair right.';
     return '';
   }
 
@@ -141,7 +205,8 @@
     if (!scores.length) return 0;
     var sum = 0, i;
     for (i = 0; i < scores.length; i++) sum += scores[i];
-    return sum / scores.length;
+    var v = sum / scores.length;
+    return isFinite(v) ? v : 0;
   }
 
   /* ============================================================
@@ -187,24 +252,43 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
+  /* The start zone the SDK sizes for this hardware, never smaller than
+     6% of the sheet. A screenless tablet gets the biggest ring even
+     though it is the most precise instrument — its hand is out of sight,
+     and acquiring a small target blind is the hardest thing it does. */
+  function startRadius() {
+    return Math.max(ArtDaily.startRadius(START_BASE), Math.round(0.06 * Math.min(W, H)));
+  }
+  function easeFactor() { return ArtDaily.ease(1); }
+
   /* ---- round state ---- */
   var round = 0, strokeIdx = 0, scores = [], biases = [], pair = null, playing = false;
   var drawing = false, stroke = [], ghosts = [], revealing = null, revealTimer = null;
-  var activePointer = null; /* one stroke = one pointer; palms and second fingers are ignored */
+  var activePointer = null, activeType = null;
+  var lastPenAt = -1e9;     /* palm rejection: a finger waits after the pen speaks */
+  var pending = null;       /* a stroke that stopped short, waiting to be carried on */
+  var snapped = false;      /* this attempt started outside the ring and was accepted */
 
   function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
 
   function strokeLabel() { return 'stroke ' + (strokeIdx + 1) + ' of ' + STROKES_PER_ROUND; }
 
-  /* Later strokes are longer (35% → 80% of canvas width); orientation
-     cycles near-horizontal / diagonal / near-vertical with jitter. */
+  function playHint() { return strokeLabel() + ' — press on A, pull one stroke to B.'; }
+
+  /* Later strokes are longer (35% → 80% of canvas width; never under 50%
+     on a phone, where a short pull plus a tiny canvas is the harshest
+     grading in the drill); orientation cycles with jitter, and skips
+     near-vertical on a narrow sheet because that is a pure thumb-pivot
+     arc, not a test of anything. */
   function makePair(idx) {
     var margin = 26;
+    var narrow = W < 520;
     var t = idx / (STROKES_PER_ROUND - 1);
-    var frac = Math.max(0.35, Math.min(0.80, 0.35 + 0.45 * t + rand(-0.03, 0.03)));
+    var lo = narrow ? 0.50 : 0.35;
+    var frac = Math.max(lo, Math.min(0.80, lo + (0.80 - lo) * t + rand(-0.03, 0.03)));
     var len = W * frac;
-    var base = [0, 45, 90, 135][idx % 4];
-    var ang = (base + rand(-12, 12)) * Math.PI / 180;
+    var pool = narrow ? [0, 50, 130, 25] : [0, 45, 90, 135];
+    var ang = (pool[idx % 4] + rand(-12, 12)) * Math.PI / 180;
     var dx = Math.cos(ang), dy = Math.sin(ang);
     /* shrink strokes that would not fit the canvas at this angle */
     if (Math.abs(dx) > 0.01) len = Math.min(len, (W - 2 * margin) / Math.abs(dx));
@@ -225,14 +309,17 @@
     biases = [];
     ghosts = [];
     stroke = [];
+    pending = null;
+    snapped = false;
     drawing = false;
     activePointer = null;
+    activeType = null;
     revealing = null;
     playing = true;
     makePair(0);
     hudRound.textContent = String(round);
     hudScore.textContent = '–';
-    hint.textContent = strokeLabel() + ' — press on A, pull one stroke to B.';
+    hint.textContent = playHint();
     draw();
   }
 
@@ -258,14 +345,26 @@
     var a = revealing ? revealing.a : pair.a;
     var b = revealing ? revealing.b : pair.b;
     if (!subdued) {
-      /* dashed grab zone: shows where a stroke may start (56px wide) */
+      var r = startRadius();
       ctx.save();
-      ctx.globalAlpha = 0.3;
-      ctx.setLineDash([4, 4]);
+      /* a decorative halo at the snap radius: press anywhere inside it and
+         the stroke is accepted. The hint and the how-to carry that in
+         words, so this one is free to stay faint */
+      ctx.globalAlpha = 0.45;
+      ctx.setLineDash([3, 5]);
       ctx.strokeStyle = c.muted;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(a.x, a.y, START_RADIUS, 0, Math.PI * 2);
+      ctx.arc(a.x, a.y, r * SNAP_MULT, 0, Math.PI * 2);
+      ctx.stroke();
+      /* the "aim here" ring, at full --muted (5.2:1 on paper, 5.8:1 on the
+         night sheet) — it used to be a 0.3-alpha hairline, so players aimed
+         far tighter than the drill was actually asking for */
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -282,14 +381,28 @@
     drawLabel(b, 'B', subdued ? c.muted : c.ink);
   }
 
+  /* Where to press to carry on after a lift — a small open ring on the
+     last sample, so "press again here" is a place, not a sentence. */
+  function drawResumeMark(c) {
+    var p = pending.lift;
+    ctx.save();
+    ctx.strokeStyle = c.accentInk;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.max(14, RESUME_PX * 0.4), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function draw() {
     var c = inks();
     ctx.clearRect(0, 0, W, H);
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
 
-    /* ghosting: the two previous attempts stay faintly on the page,
-       each with its ideal segment so the lesson persists */
+    /* the two previous attempts stay faintly on the page, each with its
+       ideal segment, so the lesson persists into the next stroke */
     if (ghosts.length) {
       ctx.save();
       for (var g = 0; g < ghosts.length; g++) {
@@ -357,6 +470,13 @@
     }
 
     if (pair) drawEndpoints(c, false);
+    /* a stroke that stopped short stays on the sheet while it waits */
+    if (pending) {
+      ctx.strokeStyle = c.ink;
+      ctx.lineWidth = 2.5;
+      drawPolyline(pending.points);
+      drawResumeMark(c);
+    }
     if (drawing) {
       ctx.strokeStyle = c.ink;
       ctx.lineWidth = 2.5;
@@ -364,13 +484,35 @@
     }
   }
 
-  /* ---- input: one pointer stroke from A to B ---- */
+  /* ---- input: press on or near A, pull to B, lift ---- */
   function pointerPos(ev) {
     var rect = canvas.getBoundingClientRect();
     return { x: ev.clientX - rect.left, y: ev.clientY - rect.top, t: ev.timeStamp || 0 };
   }
 
+  /* A pen outranks a finger: artists rest the palm before the nib lands,
+     so first-pointer-wins hands the stroke to the palm and the pen draws
+     nothing. A pen press evicts a young touch stroke; a finger stays out
+     of the way for a moment after the pen last spoke. */
+  function penWins(ev) {
+    /* only a FINGER ever waits, and only while the pen is still talking;
+       a mouse or an unknown pointer type is always allowed to draw */
+    if (ev.pointerType !== 'touch') return true;
+    return (ev.timeStamp || 0) - lastPenAt >= PEN_LOCKOUT_MS;
+  }
+
+  function abortStroke() {
+    if (activePointer !== null) {
+      try { canvas.releasePointerCapture(activePointer); } catch (e) {}
+    }
+    drawing = false;
+    activePointer = null;
+    activeType = null;
+    stroke = [];
+  }
+
   canvas.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType === 'pen') lastPenAt = ev.timeStamp || 0;
     if (!playing) return;
     if (revealing) {
       /* tap-to-continue: skip the rest of the reveal hold */
@@ -379,21 +521,51 @@
       nextStep();
       return;
     }
-    if (drawing || !pair) return;
+    if (!pair) return;
+    if (drawing) {
+      /* the palm got here first — let the pen take the stroke over */
+      if (ev.pointerType === 'pen' && activeType !== 'pen') abortStroke();
+      else return;
+    }
+    if (!penWins(ev)) return;
     ev.preventDefault();
     var p = pointerPos(ev);
-    if (Math.hypot(p.x - pair.a.x, p.y - pair.a.y) > START_RADIUS) {
-      hint.textContent = 'start at the A dot.';
+
+    /* carrying on a stroke a short throw forced you to break */
+    if (pending &&
+        Math.hypot(p.x - pending.lift.x, p.y - pending.lift.y) <= RESUME_PX &&
+        (p.t - pending.t) <= RESUME_MS) {
+      stroke = pending.points;
+      stroke.push(p);
+      pending = null;
+      drawing = true;
+      activePointer = ev.pointerId;
+      activeType = ev.pointerType;
+      try { canvas.setPointerCapture(ev.pointerId); } catch (e) {}
+      hint.textContent = strokeLabel() + ' — carrying on from where you lifted.';
+      draw();
       return;
     }
+
+    var r = startRadius();
+    var d = Math.hypot(p.x - pair.a.x, p.y - pair.a.y);
+    if (d > r * SNAP_MULT) {
+      hint.textContent = strokeLabel() + ' — that was wide of A; press on or near the A dot.';
+      return;
+    }
+    pending = null;
+    snapped = d > r;
     drawing = true;
     activePointer = ev.pointerId;
+    activeType = ev.pointerType;
     stroke = [p];
     try { canvas.setPointerCapture(ev.pointerId); } catch (e) {}
+    if (snapped) hint.textContent = strokeLabel() + ' — landed wide of A; measuring from where you started. pull to B.';
     draw();
   });
 
   canvas.addEventListener('pointermove', function (ev) {
+    if (ev.pointerType === 'pen') lastPenAt = ev.timeStamp || 0;
     if (!drawing || ev.pointerId !== activePointer) return;
     ev.preventDefault();
     /* coalesced events: full-fidelity sampling of fast strokes */
@@ -408,24 +580,46 @@
 
   function endStroke(ev) {
     if (!drawing || ev.pointerId !== activePointer) return;
-    ev.preventDefault();
+    if (ev.cancelable) ev.preventDefault();
     drawing = false;
     activePointer = null;
-    if (stroke.length < MIN_SAMPLES) {
-      /* accidental tap — reset the attempt, no penalty */
+    activeType = null;
+    if (stroke.length < 2 || pathLength(stroke) < MIN_PATH_PX) {
+      /* a press with no pull — no penalty, and say which it was */
       stroke = [];
-      hint.textContent = strokeLabel() + ' — just a tap; pull a full stroke from A to B.';
+      pending = null;
+      hint.textContent = strokeLabel() + ' — that was a press, not a pull. no penalty, go again from A.';
       draw();
       return;
     }
-    var sc = strokeScore(stroke, pair.a, pair.b);
+    /* the attempt is judged in its own frame: from the sample the player
+       actually landed on, to B */
+    var a0 = { x: stroke[0].x, y: stroke[0].y };
+    var last = stroke[stroke.length - 1];
+    var reached = strokeProgress(stroke, a0, pair.b) >= DONE_FRAC ||
+      Math.hypot(last.x - pair.b.x, last.y - pair.b.y) <= startRadius();
+    if (!reached) {
+      /* a trackpad cannot throw 550px in one go. That is the pad running
+         out, not a bad line — so it is not scored, it is resumable. */
+      var pct = Math.max(0, Math.min(99, Math.round(strokeProgress(stroke, a0, pair.b) * 100)));
+      pending = { points: stroke, lift: { x: last.x, y: last.y }, t: last.t || 0 };
+      stroke = [];
+      hint.textContent = strokeLabel() + ' — you lifted at ' + pct +
+        '% — no penalty. press inside the dashed circle to carry on, or on A to start over.';
+      draw();
+      return;
+    }
+    var ease = easeFactor();
+    var sc = strokeScore(stroke, a0, pair.b, ease);
     var sd = steadiness(stroke);
-    var wd = worstDrift(stroke, pair.a, pair.b);
+    var wd = worstDrift(stroke, a0, pair.b);
+    var missB = Math.hypot(last.x - pair.b.x, last.y - pair.b.y);
+    var endLoss = Math.round(endpointPenalty(0, missB, ease));
     scores.push(sc);
-    biases.push(signedBias(stroke, pair.a, pair.b));
+    biases.push(signedBias(stroke, a0, pair.b));
     revealing = {
       points: stroke,
-      a: pair.a,
+      a: a0,
       b: pair.b,
       score: Math.round(sc),
       steadyWord: sd === null ? '' : (sd >= 70 ? 'steady pull' : 'hesitant'),
@@ -434,14 +628,17 @@
          would take the scale twice and drift off the line it marks */
       worst: wd ? {
         p: { x: stroke[wd.i].x, y: stroke[wd.i].y },
-        foot: projectOnLine(stroke[wd.i], pair.a, pair.b),
+        foot: projectOnLine(stroke[wd.i], a0, pair.b),
         d: wd.d,
       } : null,
     };
     stroke = [];
+    /* say which half of the score moved: a line that bowed and a line
+       that stopped short are different mistakes with different fixes */
     var extra = revealing.steadyWord ? ' · ' + revealing.steadyWord : '';
+    if (endLoss >= 3) extra += ' · −' + endLoss + ' for stopping short of B';
     hint.textContent = strokeLabel() + ' — ' + revealing.score + extra +
-      (strokeIdx === 0 ? '. mint = ideal, dot = widest drift. tap for next.' : '. tap for next.');
+      (strokeIdx === 0 ? '. the green line is the straight path you were aiming for; the dot is where you drifted widest. tap for next.' : '. tap for next.');
     draw();
     clearTimeout(revealTimer);
     revealTimer = setTimeout(nextStep, REVEAL_MS);
@@ -449,26 +646,29 @@
   canvas.addEventListener('pointerup', endStroke);
   /* fallback if pointer capture failed and the release lands off-canvas */
   window.addEventListener('pointerup', endStroke);
+  /* iOS drops capture without a pointerup — treat it as the lift it is */
+  canvas.addEventListener('lostpointercapture', endStroke);
 
-  canvas.addEventListener('pointercancel', function (ev) {
+  function cancelStroke(ev) {
     /* interrupted stroke (system gesture etc.) — reset, no penalty */
     if (!drawing || ev.pointerId !== activePointer) return;
-    drawing = false;
-    activePointer = null;
-    stroke = [];
-    if (playing && !revealing) hint.textContent = strokeLabel() + ' — stroke interrupted; go again from A.';
+    abortStroke();
+    if (playing && !revealing) hint.textContent = strokeLabel() + ' — your device interrupted the stroke; no penalty, go again from A.';
     draw();
-  });
+  }
+  canvas.addEventListener('pointercancel', cancelStroke);
+  window.addEventListener('pointercancel', cancelStroke);
 
   function nextStep() {
     if (!revealing) return;
     ghosts.push({ points: revealing.points, a: revealing.a, b: revealing.b });
     if (ghosts.length > GHOSTS_KEPT) ghosts.shift();
     revealing = null;
+    pending = null;
     strokeIdx += 1;
     if (strokeIdx < STROKES_PER_ROUND) {
       makePair(strokeIdx);
-      hint.textContent = strokeLabel() + ' — press on A, pull one stroke to B.';
+      hint.textContent = playHint();
       draw();
       return;
     }
@@ -478,6 +678,7 @@
   function finishRound() {
     playing = false;
     pair = null;
+    pending = null;
     draw();
     var res = ArtDaily.report(roundScore(scores));
     hudScore.textContent = String(res.score);
@@ -510,6 +711,9 @@
   });
 
   ArtDaily.onTheme(draw);
+  /* the hardware changed mid-session (a laptop user plugged in a tablet):
+     the start ring is a different size now, so repaint it */
+  ArtDaily.onInput(function () { draw(); });
 
   /* Everything already drawn is in CSS pixels placed against the old canvas
      box, so a resize has to carry it across or the reveal — the whole lesson
@@ -540,14 +744,13 @@
     var oldW = W, oldH = H;
     fitCanvas();
     if (W === oldW && H === oldH) { draw(); return; }
-    if (drawing) {
+    if (drawing || pending) {
       /* the canvas rescaled under an in-flight stroke (rotation) —
          void the attempt, no penalty, rather than scoring it against
          geometry placed for the old canvas */
-      drawing = false;
-      activePointer = null;
-      stroke = [];
-      if (playing && !revealing) hint.textContent = strokeLabel() + ' — screen changed; go again from A.';
+      abortStroke();
+      pending = null;
+      if (playing && !revealing) hint.textContent = strokeLabel() + ' — the screen changed size; no penalty, go again from A.';
     }
     if (oldW > 0 && oldH > 0) rescaleGeometry(W / oldW, H / oldH);
     /* re-place the current pair so it always fits the new canvas */

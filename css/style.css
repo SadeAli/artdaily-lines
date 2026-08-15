@@ -39,7 +39,7 @@
   --hand: 'Caveat', 'Segoe Print', 'Comic Sans MS', cursive;
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
 
-  --game-accent: var(--mint);
+  --game-accent: var(--mint); /* TODO: pick this game's accent */
 }
 
 :root[data-theme="dark"] {
@@ -383,6 +383,20 @@ a { color: inherit; }
   }
 }
 
+/* The SDK fills this when it knows the input hardware. Scores are eased
+   per device, so the drill says which device it eased for. */
+.hud-input { min-width: 0; border: 0; background: none; padding: 5px 2px; display: flex; align-items: flex-end; }
+.hud-input dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  max-width: 8.5rem;
+  line-height: 1.25;
+}
+
 /* ============================================================
    game-specific styles below this line
    ============================================================ */
@@ -395,3 +409,39 @@ a { color: inherit; }
    Night studio keeps the pure accent: --mint is already 7.48:1 there. */
 :root { --game-accent-ink: #4A785F; }                      /* 4.86:1 on --card */
 :root[data-theme="dark"] { --game-accent-ink: var(--mint); } /* 7.48:1 on --card */
+
+/* ---- tablet + phone gesture defences ----
+   This drill's own instruction is "press on A, settle, then pull", which
+   is a >500ms dwell on a canvas — exactly the iOS Safari long-press
+   recogniser. touch-action alone does not suppress it, and preventDefault
+   on pointerdown does not cancel it: the callout appears mid-stroke and
+   the browser steals the gesture with a pointercancel. */
+.game-canvas {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+/* a stroke that strays off the canvas must not raise the text-selection
+   magnifier over the HUD it lands on */
+.game-stage,
+.hud-stats,
+.game-hud { -webkit-user-select: none; user-select: none; }
+
+/* "new round" is tapped twice in quick succession all round long; without
+   this that is double-tap-to-zoom, and the new scale persists into the
+   next stroke. The 44px floor is the touch-target minimum. */
+.btn,
+.iconbtn,
+.backlink { touch-action: manipulation; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* the canvas sits above the fold, so a downward drag begun on the hint
+   line or the HUD band pulls-to-refresh and destroys the round */
+html, body { overscroll-behavior-y: contain; }
