@@ -76,12 +76,13 @@ window.ArtDaily = (function () {
 
       /* The page passes ?theme= on the iframe src so the game paints in
          the right theme on the very first frame; standalone visits fall
-         back to the network-wide localStorage key, then dark. */
+         back to the site-wide localStorage key, then paper (light) —
+         Art Daily is a sketchbook, paper is the default. */
       var boot = params.get('theme');
       if (boot !== 'light' && boot !== 'dark') {
         try { boot = localStorage.getItem('sadeali-theme'); } catch (e) { boot = null; }
       }
-      applyTheme(boot);
+      applyTheme(boot === 'dark' ? 'dark' : 'light');
 
       if (params.get('embed') === '1') {
         /* game.css hides the standalone chrome (topbar/footer) off this. */
