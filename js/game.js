@@ -27,7 +27,6 @@
   var SNAP_MULT = 3;        /* a press this many radii out is accepted, not refused */
   var MIN_PATH_PX = 22;     /* drawn path shorter than this is a tap, not a stroke */
   var RESUME_PX = 60;       /* press this close to where you lifted = same stroke */
-  var RESUME_MS = 3000;
   var DONE_FRAC = 0.88;     /* stroke counts as finished once it gets this far to B */
   var REVEAL_MS = 1500;     /* reveal holds this long; a tap skips ahead */
   var GHOSTS_KEPT = 2;
@@ -263,6 +262,7 @@
 
   /* ---- round state ---- */
   var round = 0, strokeIdx = 0, scores = [], biases = [], pair = null, playing = false;
+  var reported = false;     /* this round has already reached ArtDaily.report */
   var drawing = false, stroke = [], ghosts = [], revealing = null, revealTimer = null;
   var activePointer = null, activeType = null;
   var lastPenAt = -1e9;     /* palm rejection: a finger waits after the pen speaks */
@@ -307,6 +307,7 @@
     strokeIdx = 0;
     scores = [];
     biases = [];
+    reported = false;
     ghosts = [];
     stroke = [];
     pending = null;
@@ -381,8 +382,11 @@
     drawLabel(b, 'B', subdued ? c.muted : c.ink);
   }
 
-  /* Where to press to carry on after a lift — a small open ring on the
-     last sample, so "press again here" is a place, not a sentence. */
+  /* Where to press to carry on after a lift — an open ring on the last
+     sample, so "press again here" is a place, not a sentence. Drawn at
+     RESUME_PX, the radius that is actually accepted: at 0.4x of it every
+     press between the drawn edge and 60px resumed a stroke the player
+     could see they were outside of. */
   function drawResumeMark(c) {
     var p = pending.lift;
     ctx.save();
@@ -390,7 +394,7 @@
     ctx.lineWidth = 2;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, Math.max(14, RESUME_PX * 0.4), 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, RESUME_PX, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
@@ -421,7 +425,9 @@
       ctx.restore();
     }
 
-    if (!playing) return;
+    /* a finished round keeps its last reveal on the sheet to study — the
+       round is already reported, so nothing is waiting on this paint */
+    if (!playing && !revealing) return;
 
     if (revealing) {
       /* the player's ink, then the ideal overlaid in accent */
@@ -531,10 +537,20 @@
     ev.preventDefault();
     var p = pointerPos(ev);
 
-    /* carrying on a stroke a short throw forced you to break */
-    if (pending &&
-        Math.hypot(p.x - pending.lift.x, p.y - pending.lift.y) <= RESUME_PX &&
-        (p.t - pending.t) <= RESUME_MS) {
+    var r = startRadius();
+    var d = Math.hypot(p.x - pair.a.x, p.y - pair.a.y);
+
+    /* Carrying on a stroke a short throw forced you to break.
+       The A ring wins wherever the two zones overlap: the drill's own words
+       are "press inside the dashed circle to carry on, or on A to start
+       over", and RESUME_PX (60) reaches well past A on a short abort — so
+       without this test the press on A silently folded the abandoned pull
+       into the scored stroke, at up to a third of the stroke's score.
+       No deadline: proximity already tells "carry on" from "start over",
+       and a player who pauses to read that sentence must not lose their
+       ink for having read it. */
+    if (pending && d > r &&
+        Math.hypot(p.x - pending.lift.x, p.y - pending.lift.y) <= RESUME_PX) {
       stroke = pending.points;
       stroke.push(p);
       pending = null;
@@ -547,8 +563,6 @@
       return;
     }
 
-    var r = startRadius();
-    var d = Math.hypot(p.x - pair.a.x, p.y - pair.a.y);
     if (d > r * SNAP_MULT) {
       hint.textContent = strokeLabel() + ' — that was wide of A; press on or near the A dot.';
       return;
@@ -602,7 +616,7 @@
       /* a trackpad cannot throw 550px in one go. That is the pad running
          out, not a bad line — so it is not scored, it is resumable. */
       var pct = Math.max(0, Math.min(99, Math.round(strokeProgress(stroke, a0, pair.b) * 100)));
-      pending = { points: stroke, lift: { x: last.x, y: last.y }, t: last.t || 0 };
+      pending = { points: stroke, lift: { x: last.x, y: last.y } };
       stroke = [];
       hint.textContent = strokeLabel() + ' — you lifted at ' + pct +
         '% — no penalty. press inside the dashed circle to carry on, or on A to start over.';
@@ -641,7 +655,15 @@
       (strokeIdx === 0 ? '. the green line is the straight path you were aiming for; the dot is where you drifted widest. tap for next.' : '. tap for next.');
     draw();
     clearTimeout(revealTimer);
-    revealTimer = setTimeout(nextStep, REVEAL_MS);
+    if (scores.length >= STROKES_PER_ROUND) {
+      /* report NOW, not after the reveal timer — a "new round" click (or a
+         closed dialog, which tears the frame down) during this reveal must
+         never swallow six finished strokes. The last reveal stays on the
+         sheet until the next round starts. */
+      finishRound();
+    } else {
+      revealTimer = setTimeout(nextStep, REVEAL_MS);
+    }
   }
   canvas.addEventListener('pointerup', endStroke);
   /* fallback if pointer capture failed and the release lands off-canvas */
@@ -680,6 +702,8 @@
     pair = null;
     pending = null;
     draw();
+    if (reported) return;   /* exactly once per round, on every path */
+    reported = true;
     var res = ArtDaily.report(roundScore(scores));
     hudScore.textContent = String(res.score);
     hudBest.textContent = res.best === null ? '–' : String(res.best);
