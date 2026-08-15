@@ -386,3 +386,12 @@ a { color: inherit; }
 /* ============================================================
    game-specific styles below this line
    ============================================================ */
+
+/* The watercolor accent is tuned as a wash on paper, where --mint lands at
+   2.89:1 against the canvas card — fine for a fill, short of AA for the
+   marks this drill actually *means* (the A/B targets, the ideal line, the
+   score). Canvas paints a colour string, not a computed blend, so the
+   AA-safe variant is its own token the draw loop reads via getComputedStyle.
+   Night studio keeps the pure accent: --mint is already 7.48:1 there. */
+:root { --game-accent-ink: #4A785F; }                      /* 4.86:1 on --card */
+:root[data-theme="dark"] { --game-accent-ink: var(--mint); } /* 7.48:1 on --card */
