@@ -172,6 +172,18 @@
     return Math.round(100 * clamp01(1 - (cv - 0.45) / 1.15));
   }
 
+  /* The reveal in words. The dashed tick already shows WHERE the line
+     bowed; this names HOW FAR, in the same band the score is graded in,
+     so the sentence and the number can never disagree. Returns '' only
+     for an unreadable stroke. */
+  function driftWords(worstPx, len, ease) {
+    var t = tolerancePx(len, ease);
+    if (!isFinite(worstPx) || worstPx < 0) return '';
+    if (worstPx <= 1.5 * t.free) return 'dead straight';
+    if (worstPx <= t.zero) return 'bowed ' + Math.round(worstPx) + 'px at its widest';
+    return 'well off the straight path — ' + Math.round(worstPx) + 'px at its widest';
+  }
+
   /* Mean signed perpendicular offset as a fraction of |AB|.
      Positive = the stroke bows right of the direction of travel
      (screen coords, y down). */
@@ -195,8 +207,19 @@
       if (biasList[i] > 0.006) right += 1;
       else if (biasList[i] < -0.006) left += 1;
     }
-    if (right >= 4 && right > left) return 'your lines curve to the right of the straight path — aim a hair left.';
-    if (left >= 4 && left > right) return 'your lines curve to the left of the straight path — aim a hair right.';
+    /* Name the FRAME, not just the side. "curve to the right of the straight
+       path — aim a hair left" is measured in the direction of the pull, and
+       the strokes of a round point six different ways: a player who has just
+       watched a left-to-right line sag downwards reads "right" as "toward B"
+       and "aim left" as "aim backwards". Saying which way you are pulling
+       makes the same true statement readable, and the arc — one wrist pivot
+       repeated six times — is the thing they can actually act on. */
+    if (right >= 4 && right > left) {
+      return 'every line arcs the same way — right of the direction you are pulling. that is the wrist pivoting: aim a hair the other way, or draw from the shoulder.';
+    }
+    if (left >= 4 && left > right) {
+      return 'every line arcs the same way — left of the direction you are pulling. that is the wrist pivoting: aim a hair the other way, or draw from the shoulder.';
+    }
     return '';
   }
 
@@ -268,6 +291,10 @@
   var lastPenAt = -1e9;     /* palm rejection: a finger waits after the pen speaks */
   var pending = null;       /* a stroke that stopped short, waiting to be carried on */
   var snapped = false;      /* this attempt started outside the ring and was accepted */
+  /* the last scored stroke, in words — the sixth stroke's reveal used to be
+     reported and overwritten by "round done" in the same tick, so the one
+     stroke a player most wants read back to them was the one that never was */
+  var lastWords = '';
 
   function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
 
@@ -312,6 +339,7 @@
     stroke = [];
     pending = null;
     snapped = false;
+    lastWords = '';
     drawing = false;
     activePointer = null;
     activeType = null;
@@ -649,8 +677,12 @@
     stroke = [];
     /* say which half of the score moved: a line that bowed and a line
        that stopped short are different mistakes with different fixes */
-    var extra = revealing.steadyWord ? ' · ' + revealing.steadyWord : '';
+    var bow = driftWords(wd ? wd.d : Infinity,
+      Math.hypot(pair.b.x - a0.x, pair.b.y - a0.y), ease);
+    var extra = bow ? ' · ' + bow : '';
+    if (revealing.steadyWord) extra += ' · ' + revealing.steadyWord;
     if (endLoss >= 3) extra += ' · −' + endLoss + ' for stopping short of B';
+    lastWords = 'last stroke ' + revealing.score + extra + '.';
     hint.textContent = strokeLabel() + ' — ' + revealing.score + extra +
       (strokeIdx === 0 ? '. the green line is the straight path you were aiming for; the dot is where you drifted widest. tap for next.' : '. tap for next.');
     draw();
@@ -708,7 +740,8 @@
     hudScore.textContent = String(res.score);
     hudBest.textContent = res.best === null ? '–' : String(res.best);
     var coach = biasCoaching(biases);
-    hint.textContent = 'round done — ' + (coach ? coach + ' ' : '') + 'press "new round" to go again.';
+    hint.textContent = 'round done — ' + (lastWords ? lastWords + ' ' : '') +
+      (coach ? coach + ' ' : '') + 'press "new round" to go again.';
     showToast((res.isNewBest ? 'new best! ' : 'score ') + res.score + ' / 100', res.isNewBest);
   }
 
