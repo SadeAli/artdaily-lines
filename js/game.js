@@ -175,11 +175,28 @@
   /* The reveal in words. The dashed tick already shows WHERE the line
      bowed; this names HOW FAR, in the same band the score is graded in,
      so the sentence and the number can never disagree. Returns '' only
-     for an unreadable stroke. */
-  function driftWords(worstPx, len, ease) {
+     for an unreadable stroke.
+
+     `rmsPx` is the very number straightness() grades — pass it and an
+     attempt the drill has ALREADY called perfect keeps the perfect
+     wording. Without it a long stroke could score a flat 100 (RMS inside
+     the free zone) and be handed "bowed 9px at its widest" in the same
+     breath: measured, 1000px pull, RMS 3.98 against a free zone of 4.
+     The player believes the sentence over the number. */
+  function driftWords(worstPx, len, ease, rmsPx) {
     var t = tolerancePx(len, ease);
     if (!isFinite(worstPx) || worstPx < 0) return '';
-    if (worstPx <= 1.5 * t.free) return 'dead straight';
+    /* 'dead straight' is reserved for an attempt the score ITSELF calls
+       perfect — straightness() is a flat 100 anywhere inside the free
+       zone. The old worst-sample test (1.5 × free) also handed it to
+       strokes scoring in the low 90s, so the reveal congratulated a line
+       the number had already marked down. Without an RMS to check
+       against, that test is still the best available fallback. */
+    if (isFinite(rmsPx) && rmsPx >= 0) {
+      if (rmsPx <= t.free) return 'dead straight';
+    } else if (worstPx <= 1.5 * t.free) {
+      return 'dead straight';
+    }
     if (worstPx <= t.zero) return 'bowed ' + Math.round(worstPx) + 'px at its widest';
     return 'well off the straight path — ' + Math.round(worstPx) + 'px at its widest';
   }
@@ -655,6 +672,9 @@
     var sc = strokeScore(stroke, a0, pair.b, ease);
     var sd = steadiness(stroke);
     var wd = worstDrift(stroke, a0, pair.b);
+    /* the same RMS straightness() grades, so the words and the number
+       are two readings of one measurement, never two measurements */
+    var rms = driftPx(stroke, a0, pair.b);
     var missB = Math.hypot(last.x - pair.b.x, last.y - pair.b.y);
     var endLoss = Math.round(endpointPenalty(0, missB, ease));
     scores.push(sc);
@@ -678,7 +698,7 @@
     /* say which half of the score moved: a line that bowed and a line
        that stopped short are different mistakes with different fixes */
     var bow = driftWords(wd ? wd.d : Infinity,
-      Math.hypot(pair.b.x - a0.x, pair.b.y - a0.y), ease);
+      Math.hypot(pair.b.x - a0.x, pair.b.y - a0.y), ease, rms);
     var extra = bow ? ' · ' + bow : '';
     if (revealing.steadyWord) extra += ' · ' + revealing.steadyWord;
     if (endLoss >= 3) extra += ' · −' + endLoss + ' for stopping short of B';
