@@ -201,6 +201,27 @@
     return 'well off the straight path — ' + Math.round(worstPx) + 'px at its widest';
   }
 
+  /* Which way the stroke missed B, in words — the sentence that names the
+     endpoint half of the score. `along` is signed distance past B measured
+     ALONG a→b (negative = short of it); `perp` is how far off that line the
+     stroke finished. Whichever is bigger is what actually happened.
+
+     It used to print "for stopping short of B" for all three misses. Measured
+     against the real drill: a pull that ran 160px PAST B was handed
+     "−14 for stopping short of B", and one that finished level with B but
+     90px wide of it got the same words. The reveal draws the ideal line and
+     the widest-drift tick, but neither says anything about the endpoint — this
+     sentence is the only place that half of the score is ever explained, so it
+     has to describe the miss the player actually made. */
+  function endMissWords(alongPx, perpPx) {
+    var along = isFinite(alongPx) ? alongPx : 0;
+    var perp = isFinite(perpPx) && perpPx > 0 ? perpPx : 0;
+    if (Math.abs(along) >= perp) {
+      return along > 0 ? 'for running past B' : 'for stopping short of B';
+    }
+    return 'for finishing wide of B';
+  }
+
   /* Mean signed perpendicular offset as a fraction of |AB|.
      Positive = the stroke bows right of the direction of travel
      (screen coords, y down). */
@@ -672,12 +693,14 @@
        actually landed on, to B */
     var a0 = { x: stroke[0].x, y: stroke[0].y };
     var last = stroke[stroke.length - 1];
-    var reached = strokeProgress(stroke, a0, pair.b) >= DONE_FRAC ||
+    var prog = strokeProgress(stroke, a0, pair.b);
+    var lenAB = Math.hypot(pair.b.x - a0.x, pair.b.y - a0.y);
+    var reached = prog >= DONE_FRAC ||
       Math.hypot(last.x - pair.b.x, last.y - pair.b.y) <= startRadius();
     if (!reached) {
       /* a trackpad cannot throw 550px in one go. That is the pad running
          out, not a bad line — so it is not scored, it is resumable. */
-      var pct = Math.max(0, Math.min(99, Math.round(strokeProgress(stroke, a0, pair.b) * 100)));
+      var pct = Math.max(0, Math.min(99, Math.round(prog * 100)));
       pending = { points: stroke, lift: { x: last.x, y: last.y } };
       stroke = [];
       hint.textContent = strokeLabel() + ' — you lifted at ' + pct +
@@ -714,11 +737,13 @@
     stroke = [];
     /* say which half of the score moved: a line that bowed and a line
        that stopped short are different mistakes with different fixes */
-    var bow = driftWords(wd ? wd.d : Infinity,
-      Math.hypot(pair.b.x - a0.x, pair.b.y - a0.y), ease, rms);
+    var bow = driftWords(wd ? wd.d : Infinity, lenAB, ease, rms);
     var extra = bow ? ' · ' + bow : '';
     if (revealing.steadyWord) extra += ' · ' + revealing.steadyWord;
-    if (endLoss >= 3) extra += ' · −' + endLoss + ' for stopping short of B';
+    if (endLoss >= 3) {
+      extra += ' · −' + endLoss + ' ' +
+        endMissWords((prog - 1) * lenAB, perpDist(last, a0, pair.b));
+    }
     lastWords = 'last stroke ' + revealing.score + extra + '.';
     hint.textContent = strokeLabel() + ' — ' + revealing.score + extra +
       (strokeIdx === 0 ? '. the green line is the straight path you were aiming for; the dot is where you drifted widest. tap for next.' : '. tap for next.');
