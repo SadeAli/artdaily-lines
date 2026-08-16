@@ -536,9 +536,17 @@
   }
 
   /* ---- input: press on or near A, pull to B, lift ---- */
-  function pointerPos(ev) {
-    var rect = canvas.getBoundingClientRect();
+  /* Split in two so a run of coalesced samples can share ONE canvas
+     measurement: getBoundingClientRect() forces a layout flush, and a fast
+     pen hands over dozens of samples per frame — all of them describing a
+     canvas that cannot have moved between them — in the same handler that
+     repaints. Measured here: 16 layout reads per pointermove instead of 1.
+     (This is the hazard ArtDaily.samples() is documented against.) */
+  function posIn(ev, rect) {
     return { x: ev.clientX - rect.left, y: ev.clientY - rect.top, t: ev.timeStamp || 0 };
+  }
+  function pointerPos(ev) {
+    return posIn(ev, canvas.getBoundingClientRect());
   }
 
   /* A pen outranks a finger: artists rest the palm before the nib lands,
@@ -574,8 +582,19 @@
     }
     if (!pair) return;
     if (drawing) {
+      /* This very pointer is down twice with no release in between, which the
+         pointer-events spec says cannot happen: its release was lost. (Press
+         on the canvas, drag out of the embed frame, let go over the page — the
+         SDK's own note describes it.) The old press is over, so drop it.
+         Without this the `else return` below swallowed the new press while
+         pointermove — which only checks `drawing` and the id, both still
+         matching — kept appending its samples to the ABANDONED stroke. The two
+         were welded and scored as one: measured, a clean A→B pull scored 0
+         instead of 100, and the reveal blamed the player for 141px of drift
+         they had already walked away from. */
+      if (ev.pointerId === activePointer) abortStroke();
       /* the palm got here first — let the pen take the stroke over */
-      if (ev.pointerType === 'pen' && activeType !== 'pen') abortStroke();
+      else if (ev.pointerType === 'pen' && activeType !== 'pen') abortStroke();
       else return;
     }
     if (!penWins(ev)) return;
@@ -627,13 +646,11 @@
     if (ev.pointerType === 'pen') lastPenAt = ev.timeStamp || 0;
     if (!drawing || ev.pointerId !== activePointer) return;
     ev.preventDefault();
-    /* coalesced events: full-fidelity sampling of fast strokes */
-    var evs = ev.getCoalescedEvents ? ev.getCoalescedEvents() : null;
-    if (evs && evs.length) {
-      for (var i = 0; i < evs.length; i++) stroke.push(pointerPos(evs[i]));
-    } else {
-      stroke.push(pointerPos(ev));
-    }
+    /* coalesced events: full-fidelity sampling of fast strokes. The canvas is
+       measured ONCE for the whole run — see posIn(). */
+    var rect = canvas.getBoundingClientRect();
+    var evs = ArtDaily.samples(ev);
+    for (var i = 0; i < evs.length; i++) stroke.push(posIn(evs[i], rect));
     draw();
   });
 
