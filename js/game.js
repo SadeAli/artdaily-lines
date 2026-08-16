@@ -581,6 +581,26 @@
     return (ev.timeStamp || 0) - lastPenAt >= PEN_LOCKOUT_MS;
   }
 
+  /* The press that owns the current stroke is provably no longer down.
+
+     A pointer is `primary` only while it is the FIRST ACTIVE pointer of its
+     type, so a new primary of the SAME type proves the stored one has ended —
+     while a genuine second finger arriving during a live stroke is never
+     primary, and is still ignored by the guard below.
+
+     This is the only recovery a FINGER has. The same-id branch below exists
+     for a release lost outside the document (press, drag out of the embed
+     frame, let go over the page), and it works for a mouse or a pen because
+     those keep one pointerId for the whole session. Every touch gets a FRESH
+     id, so that branch can never fire for one — and no pointerup,
+     pointercancel or lostpointercapture will ever arrive for a finger that is
+     already gone. Measured: one lost touch release left `drawing` true against
+     an id nothing could match again, every later press was swallowed, and the
+     sheet was dead until "new round" — which throws the whole round away. */
+  function ownerGone(ev) {
+    return ev.isPrimary === true && ev.pointerType === activeType;
+  }
+
   function abortStroke() {
     if (activePointer !== null) {
       try { canvas.releasePointerCapture(activePointer); } catch (e) {}
@@ -616,6 +636,8 @@
       if (ev.pointerId === activePointer) abortStroke();
       /* the palm got here first — let the pen take the stroke over */
       else if (ev.pointerType === 'pen' && activeType !== 'pen') abortStroke();
+      /* a finger's release was lost: the id is new but the old one is gone */
+      else if (ownerGone(ev)) abortStroke();
       else return;
     }
     if (!penWins(ev)) return;
